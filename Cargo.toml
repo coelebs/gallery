@@ -1,0 +1,8 @@
+[package]
+name = "gallery"
+version = "0.1.0"
+authors = ["Vincent Kriek <vincent@kriek.org>"]
+
+[dependencies]
+quick-xml = "0.10.0"
+rusqlite = "0.13.0"
