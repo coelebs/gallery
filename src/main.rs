@@ -1,5 +1,9 @@
+#![feature(plugin)]
+#![plugin(rocket_codegen)]
+
 extern crate quick_xml;
 extern crate rusqlite;
+extern crate rocket;
 
 use quick_xml::reader::Reader;
 use quick_xml::events::Event;
@@ -10,9 +14,11 @@ use rusqlite::Connection;
 use std::io::BufReader;
 use std::fs;
 use std::path;
+use std::env;
 
 #[derive(Debug)]
 struct Image {
+    id: i64,
     path: path::PathBuf,
     rating: u8,
     subjects: Vec<Subject>,
@@ -27,12 +33,15 @@ struct Subject {
 
 impl Image {
     fn initialize_db(conn: &Connection) {
+
+        conn.execute("DROP TABLE IF EXISTS Image;", &[]).unwrap();
         conn.execute("CREATE TABLE Image (
                         id          INTEGER PRIMARY KEY,
                         path        TEXT,
                         rating      INTEGER
                       );", &[]).unwrap();
 
+        conn.execute("DROP TABLE IF EXISTS Image_Subjects;", &[]).unwrap();
         conn.execute("CREATE TABLE Image_Subjects (
                         img_subj_id INTEGER PRIMARY KEY, 
                         image_id    INTEGER,
@@ -96,12 +105,13 @@ impl Image {
 
         subjects.retain(|x| x.trim().len() > 0);
 
-        Image {path: path.to_path_buf(), rating: rating.unwrap(), subjects: Subject::parse_subjects(&subjects)}
+        Image {id: -1, path: path.to_path_buf(), rating: rating.unwrap(), subjects: Subject::parse_subjects(&subjects)}
     }
 }
 
 impl Subject {
     fn initialize_db(conn: &Connection) {
+        conn.execute("DROP TABLE IF EXISTS Subject;", &[]).unwrap();
         conn.execute("CREATE TABLE Subject (
                         id          INTEGER PRIMARY KEY,
                         family      TEXT,
@@ -138,17 +148,71 @@ impl Subject {
 
 }
 
-fn main() {
-    let entry_point = path::Path::new("/mnt/freenas/pictures/organised/2018/2018-04/2018-04-22/");
+#[get("/")]
+fn index() -> &'static str {
+    "Hello, world!"
+}
+
+#[get("/gallery/<rating>")]
+fn gallery(rating: u8) -> String {
+    let mut result = String::new();
 
     let conn = Connection::open("db.sqlite").ok().unwrap();
-    Image::initialize_db(&conn);
-    Subject::initialize_db(&conn);
+    let mut qry = conn.prepare("SELECT id, rating, path FROM Image WHERE rating >= ?1").unwrap();
+
+    let image_iter = qry.query_map(&[&rating], |row| {
+         let path_s: String = row.get(2);
+         Image {
+            id: row.get(0),
+            path: path::PathBuf::from(path_s),
+            rating: row.get(1),
+            subjects: Vec::new()
+        }
+    }).unwrap();
     
-    for entry in fs::read_dir(entry_point).unwrap() {
-        let path = entry.ok().unwrap().path();
-        if path.extension().unwrap().to_str() == Some("xmp") {
-            Image::parse_xmp(&path).insert(&conn);
+    let mut subj_qry = conn.prepare("SELECT s.id, s.family, person FROM Subject s
+                            LEFT JOIN Image_Subjects ims ON ims.subject_id = s.id
+                            WHERE ims.image_id = ?1").unwrap();
+    for i in image_iter {
+        let image = i.unwrap();
+        result.push_str(&format!("{:?}: {:?}\n", image.rating, image.path));
+
+        let subject_iter = subj_qry.query_map(&[&image.id], |row| {
+            Subject {
+                id: row.get(0),
+                family: row.get(1),
+                person: row.get(2),
+            }
+        }).unwrap();
+
+        for s in subject_iter {
+            let subject = s.unwrap();
+            result.push_str(&format!("\t\t{:?}|{:?}\n", subject.family, subject.person));
+        }
+
+        result.push('\n');
+    }
+
+    result
+}
+
+fn main() {
+    let args: Vec<_> = env::args().collect();
+    let entry_point = path::Path::new("/mnt/freenas/pictures/organised/2018/2018-04/2018-04-22/");
+
+
+    if args.len() > 1 {
+        let conn = Connection::open("db.sqlite").ok().unwrap();
+        Image::initialize_db(&conn);
+        Subject::initialize_db(&conn);
+        
+        for entry in fs::read_dir(entry_point).unwrap() {
+            let path = entry.ok().unwrap().path();
+            if path.extension().unwrap().to_str() == Some("xmp") {
+                Image::parse_xmp(&path).insert(&conn);
+            }
         }
     }
+
+    rocket::ignite().mount("/", routes![index, gallery]).launch();
 }
