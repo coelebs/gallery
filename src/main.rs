@@ -4,6 +4,9 @@
 extern crate quick_xml;
 extern crate rusqlite;
 extern crate rocket;
+extern crate libraw_sys as libraw;
+extern crate base64;
+extern crate image;
 
 use quick_xml::reader::Reader;
 use quick_xml::events::Event;
@@ -15,6 +18,7 @@ use std::io::BufReader;
 use std::fs;
 use std::path;
 use std::env;
+use std::ffi::CString;
 
 #[derive(Debug)]
 struct Image {
@@ -107,6 +111,43 @@ impl Image {
 
         Image {id: -1, path: path.to_path_buf(), rating: rating.unwrap(), subjects: Subject::parse_subjects(&subjects)}
     }
+
+    fn base64_thumb(path: &path::Path) -> String {
+        let thumb_data;
+        unsafe {
+            let libraw_data = libraw::libraw_init(libraw::LIBRAW_OPTIONS_NONE);
+            
+            if libraw::libraw_open_file(libraw_data, 
+                                        CString::new(path.to_str().unwrap()).unwrap().as_ptr()) != 0 {
+                panic!("Libraw open file failed");
+            }
+
+            if libraw::libraw_unpack_thumb(libraw_data) != 0 {
+                panic!("Libraw unpack thumb failed");
+            }
+
+            /*if libraw::libraw_dcraw_thumb_writer(libraw_data, CString::new(output_fn).unwrap().as_ptr()) != 0 {
+                panic!("Libraw thumb_writer failed");
+            }*/
+            let mut result = 0;
+            let libraw_thumb = libraw::libraw_dcraw_make_mem_thumb(libraw_data, &mut result);
+            if result != 0 {
+                panic!("Libraw make mem thumb failed");
+            }
+
+            thumb_data = std::slice::from_raw_parts((*libraw_thumb).data.as_ptr(), 
+                                                    (*libraw_thumb).data_size as usize);
+        }
+
+        let mut img = image::load_from_memory(thumb_data).ok().unwrap();
+
+        img = img.thumbnail(1000, 1000);
+
+        let mut data = Vec::new();
+        img.write_to(&mut data, image::ImageFormat::JPEG);
+
+        base64::encode(&data)
+    }
 }
 
 impl Subject {
@@ -155,10 +196,10 @@ fn index() -> &'static str {
 
 #[get("/gallery/<rating>")]
 fn gallery(rating: u8) -> String {
-    let mut result = String::new();
+    let mut result = String::from("<html><head/><body>");
 
     let conn = Connection::open("db.sqlite").ok().unwrap();
-    let mut qry = conn.prepare("SELECT id, rating, path FROM Image WHERE rating >= ?1").unwrap();
+    let mut qry = conn.prepare("SELECT id, rating, path FROM Image WHERE rating = ?1").unwrap();
 
     let image_iter = qry.query_map(&[&rating], |row| {
          let path_s: String = row.get(2);
@@ -175,7 +216,15 @@ fn gallery(rating: u8) -> String {
                             WHERE ims.image_id = ?1").unwrap();
     for i in image_iter {
         let image = i.unwrap();
-        result.push_str(&format!("{:?}: {:?}\n", image.rating, image.path));
+        result.push_str(&format!("{:?}\n", image.rating));
+
+        let raw_str = image.path.to_str().unwrap().replace(".xmp","");
+        let raw_path = path::Path::new(&raw_str);
+        let base64 = Image::base64_thumb(raw_path);
+        result.push_str("<img src=\"data:image/jpeg;base64,");
+        result.push_str(&base64);  
+        result.push_str("\"/>\n");
+        println!("didn't get to display it");
 
         let subject_iter = subj_qry.query_map(&[&image.id], |row| {
             Subject {
@@ -192,6 +241,8 @@ fn gallery(rating: u8) -> String {
 
         result.push('\n');
     }
+     
+    result.push_str("</body></html>");
 
     result
 }
