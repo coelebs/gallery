@@ -8,6 +8,9 @@ extern crate rusqlite;
 extern crate rocket;
 extern crate time;
 extern crate uuid;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 
 pub mod model;
 
@@ -63,7 +66,6 @@ fn read_dir(entry_point: &path::Path, thumb_dir: &path::Path, conn: &rusqlite::C
     for entry in fs::read_dir(entry_point).unwrap() {
         let path = entry.ok().unwrap().path();
         if path.is_file() && path.extension().unwrap().to_str() == Some("CR2") {
-            println!("Image {}", path.to_str().unwrap());
             model::Image::parse(&path, &thumb_dir, &conn).insert(&conn);
         } else if path.is_dir() {
             read_dir(&path, &thumb_dir, &conn);
@@ -72,11 +74,16 @@ fn read_dir(entry_point: &path::Path, thumb_dir: &path::Path, conn: &rusqlite::C
 }
 
 fn main() {
+    env_logger::init();
+
     let args: Vec<_> = env::args().collect();
     let entry_point = path::Path::new("/mnt/freenas/pictures/2018/");
     let thumb_dir   = path::Path::new("/mnt/media2/tmp/thumb/");
 
     if args.len() > 1 {
+        info!("Starting scan over {:?}", entry_point);
+        info!("Saving thumbnails in {:?}", thumb_dir);
+
         let conn = Connection::open("db.sqlite").ok().unwrap();
         model::Image::initialize_db(&conn);
         model::Subject::initialize_db(&conn);

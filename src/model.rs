@@ -129,6 +129,8 @@ impl Image {
     }
 
     pub fn parse(path: &path::Path, thumb_dir: &path::Path,  conn: &rusqlite::Connection) -> Image {
+        info!("Parsing {:?}", path);
+
         let result;
 
         let mut query = conn.prepare("SELECT * FROM Image
@@ -139,7 +141,6 @@ impl Image {
         let nxt = image_iter.next();
         
         if nxt.is_none() {
-            println!("\tImage new");
             result = Image::parse_xmp(path);
         } else {
             let image = nxt.unwrap().unwrap();
@@ -148,10 +149,8 @@ impl Image {
                   < path.metadata().unwrap().modified().unwrap()
                         .duration_since(std::time::UNIX_EPOCH).unwrap() 
                         .as_secs() {
-                println!("\tImage new or changed");
                 result = Image::parse_xmp(path); 
             } else {
-                println!("\tImage unchanged");
                 result = image;
             }
         }
