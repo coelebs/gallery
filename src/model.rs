@@ -1,9 +1,10 @@
 use image;
 use libraw;
-use base64;
 use rusqlite;
 use std;
 use time;
+
+use uuid::Uuid;
 
 use quick_xml::reader::Reader;
 use quick_xml::events::Event;
@@ -127,7 +128,7 @@ impl Image {
         }
     }
 
-    pub fn parse(path: &path::Path, conn: &rusqlite::Connection) -> Image {
+    pub fn parse(path: &path::Path, thumb_dir: &path::Path,  conn: &rusqlite::Connection) -> Image {
         let result;
 
         let mut query = conn.prepare("SELECT * FROM Image
@@ -139,32 +140,34 @@ impl Image {
         
         if nxt.is_none() {
             println!("\tImage new");
-            return Image::parse_xmp(path);
-        } 
-
-        let image = nxt.unwrap().unwrap();
-
-        if (image.last_modified.sec as u64) 
-              < path.metadata().unwrap().modified().unwrap()
-                    .duration_since(std::time::UNIX_EPOCH).unwrap() 
-                    .as_secs() {
-            println!("\tImage new or changed");
-            result = Image::parse_xmp(path); 
+            result = Image::parse_xmp(path);
         } else {
-            println!("\tImage unchanged");
-            result = image;
+            let image = nxt.unwrap().unwrap();
+
+            if (image.last_modified.sec as u64) 
+                  < path.metadata().unwrap().modified().unwrap()
+                        .duration_since(std::time::UNIX_EPOCH).unwrap() 
+                        .as_secs() {
+                println!("\tImage new or changed");
+                result = Image::parse_xmp(path); 
+            } else {
+                println!("\tImage unchanged");
+                result = image;
+            }
         }
+
+        Image::extract_thumb(result.path.as_path(), thumb_dir);
 
         result
     }
 
-    fn base64_thumb(path: &path::Path) -> String {
+    fn extract_thumb(raw_path: &path::Path, thumb_path: &path::Path) -> path::PathBuf {
         let thumb_data;
         unsafe {
             let libraw_data = libraw::libraw_init(libraw::LIBRAW_OPTIONS_NONE);
             
             if libraw::libraw_open_file(libraw_data, 
-                                        CString::new(path.to_str().unwrap()).unwrap().as_ptr()) != 0 {
+                                        CString::new(raw_path.to_str().unwrap()).unwrap().as_ptr()) != 0 {
                 panic!("Libraw open file failed");
             }
 
@@ -172,9 +175,6 @@ impl Image {
                 panic!("Libraw unpack thumb failed");
             }
 
-            /*if libraw::libraw_dcraw_thumb_writer(libraw_data, CString::new(output_fn).unwrap().as_ptr()) != 0 {
-                panic!("Libraw thumb_writer failed");
-            }*/
             let mut result = 0;
             let libraw_thumb = libraw::libraw_dcraw_make_mem_thumb(libraw_data, &mut result);
             if result != 0 {
@@ -186,19 +186,19 @@ impl Image {
         }
 
         let mut img = image::load_from_memory(thumb_data).ok().unwrap();
-
         img = img.thumbnail(1000, 1000);
 
-        let mut data = Vec::new();
-        img.write_to(&mut data, image::ImageFormat::JPEG).unwrap();
+        let thumb_file = thumb_path.to_path_buf().join(format!("{}.jpg", 
+                                                       Uuid::new_v4().hyphenated()));
 
-        base64::encode(&data)
+        img.save(thumb_file.clone()).unwrap();
+
+        thumb_file
     }
 }
 
 impl Subject {
     pub fn initialize_db(conn: &rusqlite::Connection) {
-        //conn.execute("DROP TABLE IF EXISTS Subject;", &[]).unwrap();
         conn.execute("CREATE TABLE IF NOT EXISTS Subject (
                         id          INTEGER PRIMARY KEY,
                         family      TEXT,

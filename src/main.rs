@@ -3,11 +3,11 @@
 
 extern crate image;
 extern crate libraw_sys as libraw;
-extern crate base64;
 extern crate quick_xml;
 extern crate rusqlite;
 extern crate rocket;
 extern crate time;
+extern crate uuid;
 
 pub mod model;
 
@@ -59,14 +59,14 @@ fn gallery(rating: u8) -> String {
     result
 }
 
-fn read_dir(entry_point: &path::Path, conn: &rusqlite::Connection) {
+fn read_dir(entry_point: &path::Path, thumb_dir: &path::Path, conn: &rusqlite::Connection) {
     for entry in fs::read_dir(entry_point).unwrap() {
         let path = entry.ok().unwrap().path();
         if path.is_file() && path.extension().unwrap().to_str() == Some("CR2") {
-            println!("Scanning {:?}", path);
-            model::Image::parse(&path, &conn).insert(&conn);
+            println!("Image {}", path.to_str().unwrap());
+            model::Image::parse(&path, &thumb_dir, &conn).insert(&conn);
         } else if path.is_dir() {
-            read_dir(&path, &conn);
+            read_dir(&path, &thumb_dir, &conn);
         }
     }
 }
@@ -74,13 +74,14 @@ fn read_dir(entry_point: &path::Path, conn: &rusqlite::Connection) {
 fn main() {
     let args: Vec<_> = env::args().collect();
     let entry_point = path::Path::new("/mnt/freenas/pictures/2018/");
+    let thumb_dir   = path::Path::new("/mnt/media2/tmp/thumb/");
 
     if args.len() > 1 {
         let conn = Connection::open("db.sqlite").ok().unwrap();
         model::Image::initialize_db(&conn);
         model::Subject::initialize_db(&conn);
         
-        read_dir(&entry_point, &conn);
+        read_dir(&entry_point, &thumb_dir, &conn);
     }
 
     rocket::ignite().mount("/", routes![index, gallery]).launch();
