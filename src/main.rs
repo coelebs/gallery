@@ -11,6 +11,7 @@ extern crate time;
 extern crate uuid;
 extern crate env_logger;
 extern crate serde;
+extern crate clap;
 
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
@@ -21,7 +22,6 @@ use rusqlite::Connection;
 
 use std::fs;
 use std::path;
-use std::env;
 
 use rocket::response::NamedFile;
 use rocket_contrib::Template;
@@ -87,11 +87,22 @@ fn read_dir(entry_point: &path::Path, thumb_dir: &path::Path, conn: &rusqlite::C
 fn main() {
     env_logger::init();
 
-    let args: Vec<_> = env::args().collect();
-    let entry_point = path::Path::new("/mnt/freenas/pictures/2018/2018-05/2018-05-11/");
+    let matches = clap::App::new("RawGallery")
+                        .subcommand(clap::SubCommand::with_name("scan")
+                                          .about("Scan directory and add to gallery")
+                                          .version("0.1")
+                                          .arg(clap::Arg::with_name("FOLDER")
+                                               .help("Start recursively scanning from this folder")
+                                               .required(true)
+                                               .index(1)))
+                        .get_matches();
+                                                           
+
     let thumb_dir   = path::Path::new("static/thumb/");
 
-    if args.len() > 1 {
+    if let Some(matches) = matches.subcommand_matches("scan") {
+        let entry_point = path::Path::new(matches.value_of("FOLDER").unwrap());
+
         info!("Starting scan over {:?}", entry_point);
         info!("Saving thumbnails in {:?}", thumb_dir);
 
