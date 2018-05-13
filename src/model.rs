@@ -216,11 +216,11 @@ impl Image {
                                                        Uuid::new_v4().hyphenated()));
 
         let output = Command::new("darktable-cli")
-                             .arg(raw_path.as_os_str())
-                             .arg(xmp.as_os_str())
-                             .arg(thumb_file.as_os_str())
-                             .arg("--width 1000")
-                             .arg("--height 1000")
+                             .arg(raw_path.to_str().unwrap())
+                             .arg(xmp.to_str().unwrap())
+                             .arg(thumb_file.to_str().unwrap()) 
+                             .args(&["--width", "640"])
+                             .args(&["--height", "640"])
                              .output()
                              .expect("Failed to develop image");
 
