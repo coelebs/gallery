@@ -14,6 +14,7 @@ use std::io::BufReader;
 use std::fs;
 use std::path;
 use std::ffi::CString;
+use std::process::Command;
 
 #[derive(Serialize)]
 #[serde(remote = "time::Timespec")]
@@ -130,7 +131,7 @@ impl Image {
 
         subjects.retain(|x| x.trim().len() > 0);
 
-        let thumb_path =  Image::extract_thumb(img_path, thumb_dir);
+        let thumb_path =  Image::develop_thumb(img_path, thumb_dir);
 
         Image {
             id: -1, 
@@ -203,6 +204,28 @@ impl Image {
                                                        Uuid::new_v4().hyphenated()));
 
         img.save(thumb_file.clone()).unwrap();
+
+        thumb_file
+    }
+
+    fn develop_thumb(raw_path: &path::Path, thumb_path: &path::Path) -> path::PathBuf {
+        let xmp = raw_path.with_extension(format!("{}.xmp", raw_path.extension().unwrap()
+                                                            .to_str().unwrap()));
+        
+        let thumb_file = thumb_path.to_path_buf().join(format!("{}.jpg", 
+                                                       Uuid::new_v4().hyphenated()));
+
+        let output = Command::new("darktable-cli")
+                             .arg(raw_path.as_os_str())
+                             .arg(xmp.as_os_str())
+                             .arg(thumb_file.as_os_str())
+                             .arg("--width 1000")
+                             .arg("--height 1000")
+                             .output()
+                             .expect("Failed to develop image");
+
+        info!("Darktable stdout: {}", String::from_utf8_lossy(&output.stdout));
+        info!("Darktable stderr: {}", String::from_utf8_lossy(&output.stderr));
 
         thumb_file
     }
