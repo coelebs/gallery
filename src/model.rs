@@ -15,16 +15,25 @@ use std::fs;
 use std::path;
 use std::ffi::CString;
 
-#[derive(Debug)]
+#[derive(Serialize)]
+#[serde(remote = "time::Timespec")]
+struct TimespecDef {
+    sec: i64,
+    nsec: i32,
+}
+
+#[derive(Debug,Serialize)]
 pub struct Image {
     pub id: i64,
     pub path: path::PathBuf,
     pub rating: u8,
     pub subjects: Vec<Subject>,
+    #[serde(with = "TimespecDef")]
     pub last_modified: time::Timespec,
+    pub thumb_path: path::PathBuf,
 }
 
-#[derive(Debug)]
+#[derive(Debug,Serialize)]
 pub struct Subject {
     pub id: i64,
     pub family: String,
@@ -38,7 +47,8 @@ impl Image {
                         id              INTEGER PRIMARY KEY,
                         path            TEXT,
                         rating          INTEGER,
-                        last_modified   TEXT
+                        last_modified   TEXT,
+                        thumb_path      TEXT
                       );", &[]).unwrap();
 
         conn.execute("CREATE TABLE IF NOT EXISTS Image_Subjects (
@@ -49,9 +59,9 @@ impl Image {
     }
 
     pub fn insert(self, conn: &rusqlite::Connection) -> i64 {
-        conn.execute("INSERT INTO Image (path, rating, last_modified)
-                      VALUES (?1, ?2, ?3)", 
-                      &[&self.path.to_str(), &self.rating, &self.last_modified])
+        conn.execute("INSERT INTO Image (path, rating, last_modified, thumb_path)
+                      VALUES (?1, ?2, ?3, ?4)", 
+                      &[&self.path.to_str(), &self.rating, &self.last_modified, &self.thumb_path.to_str()])
                     .unwrap();
 
         let image_id = conn.last_insert_rowid();
@@ -72,7 +82,8 @@ impl Image {
             path: path::PathBuf::from(row.get::<i32, String>(1)),
             rating: row.get(2),
             subjects: Vec::new(),
-            last_modified: row.get(3)
+            last_modified: row.get(3),
+            thumb_path: path::PathBuf::from(row.get::<i32, String>(4))
         }
     }
 
@@ -82,8 +93,8 @@ impl Image {
               .last()
     }
 
-    fn parse_xmp(path: &path::Path) -> Image {
-        let xmp = path.with_extension(format!("{}.xmp", path.extension().unwrap()
+    fn parse_xmp(img_path: &path::Path, thumb_dir: &path::Path) -> Image {
+        let xmp = img_path.with_extension(format!("{}.xmp", img_path.extension().unwrap()
                                                             .to_str().unwrap()));
 
         let mut reader = 
@@ -119,12 +130,15 @@ impl Image {
 
         subjects.retain(|x| x.trim().len() > 0);
 
+        let thumb_path =  Image::extract_thumb(img_path, thumb_dir);
+
         Image {
             id: -1, 
-            path: path.to_path_buf(), 
+            path: img_path.to_path_buf(), 
             rating: rating.unwrap(), 
             subjects: Subject::parse_subjects(&subjects),
-            last_modified: time::now().to_timespec()
+            last_modified: time::now().to_timespec(),
+            thumb_path: thumb_path
         }
     }
 
@@ -141,7 +155,7 @@ impl Image {
         let nxt = image_iter.next();
         
         if nxt.is_none() {
-            result = Image::parse_xmp(path);
+            result = Image::parse_xmp(path, thumb_dir);
         } else {
             let image = nxt.unwrap().unwrap();
 
@@ -149,13 +163,11 @@ impl Image {
                   < path.metadata().unwrap().modified().unwrap()
                         .duration_since(std::time::UNIX_EPOCH).unwrap() 
                         .as_secs() {
-                result = Image::parse_xmp(path); 
+                result = Image::parse_xmp(path, thumb_dir); 
             } else {
                 result = image;
             }
         }
-
-        Image::extract_thumb(result.path.as_path(), thumb_dir);
 
         result
     }
@@ -231,6 +243,4 @@ impl Subject {
 
         result
     }
-
 }
-

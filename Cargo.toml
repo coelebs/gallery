@@ -14,3 +14,10 @@ time = "0.1.40"
 uuid = { version = "0.6", features = ["v4"] }
 log = "0.4.0"
 env_logger = "0.5.1"
+serde = "1.0.55"
+serde_derive = "1.0.55"
+
+[dependencies.rocket_contrib]
+version = "0.3.9"
+default-features = false
+features = ["tera_templates"]
