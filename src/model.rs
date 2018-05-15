@@ -1,8 +1,9 @@
 use image;
 use libraw;
-use rusqlite;
 use std;
-use time;
+use chrono;
+use schema;
+use diesel;
 
 use uuid::Uuid;
 
@@ -16,85 +17,54 @@ use std::path;
 use std::ffi::CString;
 use std::process::Command;
 
-#[derive(Serialize)]
-#[serde(remote = "time::Timespec")]
-struct TimespecDef {
-    sec: i64,
-    nsec: i32,
+use diesel::prelude::*;
+use diesel::Connection;
+
+use dotenv::dotenv;
+
+use super::schema::images;
+
+#[derive(Insertable)]
+#[table_name="images"]
+pub struct NewImage<'a> {
+    pub path: &'a str,
+    pub rating: i32,
+    pub last_modified: chrono::NaiveDateTime,
+    pub thumb_path: &'a str, 
 }
 
-#[derive(Debug,Serialize)]
+#[derive(Debug,Serialize,Queryable,Clone)]
 pub struct Image {
-    pub id: i64,
-    pub path: path::PathBuf,
-    pub rating: u8,
-    pub subjects: Vec<Subject>,
-    #[serde(with = "TimespecDef")]
-    pub last_modified: time::Timespec,
-    pub thumb_path: path::PathBuf,
+    pub id: i32,
+    pub path: String,
+    pub rating: i32,
+    //pub subjects: Vec<Subject>,
+    pub last_modified: chrono::NaiveDateTime,
+    pub thumb_path: String,
 }
 
-#[derive(Debug,Serialize)]
+#[derive(Debug,Serialize,Queryable)]
 pub struct Subject {
-    pub id: i64,
+    pub id: i32,
     pub family: String,
     pub person: String,
 }
 
+#[derive(Debug,Serialize,Queryable)]
+pub struct ImageSubjects {
+  pub id: i64,        
+  pub image_id: i64,  
+  pub subject_id: i64,
+}
+
 impl Image {
-    pub fn initialize_db(conn: &rusqlite::Connection) {
-
-        conn.execute("CREATE TABLE IF NOT EXISTS Image (
-                        id              INTEGER PRIMARY KEY,
-                        path            TEXT,
-                        rating          INTEGER,
-                        last_modified   TEXT,
-                        thumb_path      TEXT
-                      );", &[]).unwrap();
-
-        conn.execute("CREATE TABLE IF NOT EXISTS Image_Subjects (
-                        img_subj_id INTEGER PRIMARY KEY, 
-                        image_id    INTEGER,
-                        subject_id  INGEGER
-                      );", &[]).unwrap();
-    }
-
-    pub fn insert(self, conn: &rusqlite::Connection) -> i64 {
-        conn.execute("INSERT INTO Image (path, rating, last_modified, thumb_path)
-                      VALUES (?1, ?2, ?3, ?4)", 
-                      &[&self.path.to_str(), &self.rating, &self.last_modified, &self.thumb_path.to_str()])
-                    .unwrap();
-
-        let image_id = conn.last_insert_rowid();
-
-        for mut subject in self.subjects {
-            subject.insert(conn);
-
-            conn.execute("INSERT INTO Image_Subjects (image_id, subject_id)
-                          VALUES (?1, ?2)", &[&image_id, &subject.id]).unwrap();
-        }
-
-        image_id
-    }
-
-    pub fn from_row(row: &rusqlite::Row) -> Image {
-         Image {
-            id: row.get(0),
-            path: path::PathBuf::from(row.get::<i32, String>(1)),
-            rating: row.get(2),
-            subjects: Vec::new(),
-            last_modified: row.get(3),
-            thumb_path: path::PathBuf::from(row.get::<i32, String>(4))
-        }
-    }
-
-    fn parse_rating(input: Vec<Attribute>, reader: &Reader<BufReader<fs::File>>) -> Option<u8> {
+    fn parse_rating(input: Vec<Attribute>, reader: &Reader<BufReader<fs::File>>) -> Option<i32> {
         input.into_iter().filter(|x| x.key == b"xmp:Rating")
-              .map(|x| x.unescape_and_decode_value(reader).ok().unwrap().parse::<u8>().unwrap())
+              .map(|x| x.unescape_and_decode_value(reader).ok().unwrap().parse().unwrap())
               .last()
     }
 
-    fn parse_xmp(img_path: &path::Path, thumb_dir: &path::Path) -> Image {
+    fn parse_xmp(img_path: &path::Path, thumb_dir: &path::Path, conn: &PgConnection) -> Image {
         let xmp = img_path.with_extension(format!("{}.xmp", img_path.extension().unwrap()
                                                             .to_str().unwrap()));
 
@@ -131,42 +101,46 @@ impl Image {
 
         subjects.retain(|x| x.trim().len() > 0);
 
-        let thumb_path =  Image::develop_thumb(img_path, thumb_dir);
+        let thumb_path = Image::develop_thumb(img_path, thumb_dir);
+        let system_time = img_path.metadata().unwrap()
+                                  .modified().unwrap()
+                                  .duration_since(std::time::UNIX_EPOCH).unwrap();
 
-        Image {
-            id: -1, 
-            path: img_path.to_path_buf(), 
+        let new_image = NewImage {
+            path: img_path.to_str().unwrap(),
             rating: rating.unwrap(), 
-            subjects: Subject::parse_subjects(&subjects),
-            last_modified: time::now().to_timespec(),
-            thumb_path: thumb_path
-        }
+            last_modified: chrono::NaiveDateTime::from_timestamp_opt(system_time.as_secs() as i64,
+                                                                     system_time.subsec_millis()).unwrap(),
+            thumb_path: thumb_path.to_str().unwrap()
+        };
+
+        diesel::insert_into(schema::images::table)
+            .values(&new_image)
+            .get_result(conn)
+            .expect("Error saving new post")
     }
 
-    pub fn parse(path: &path::Path, thumb_dir: &path::Path,  conn: &rusqlite::Connection) -> Image {
+    pub fn parse(path: &path::Path, thumb_dir: &path::Path, conn: &PgConnection) -> Image {
         info!("Parsing {:?}", path);
 
         let result;
 
-        let mut query = conn.prepare("SELECT * FROM Image
-                                      WHERE path = ?1").unwrap();
-        let mut image_iter = query.query_map(&[&path.to_path_buf().to_str()], |row| Image::from_row(row))
-                                  .unwrap();
-
-        let nxt = image_iter.next();
+        let images  = images::table.filter(images::path.eq(path.to_str().unwrap()))
+                        .load::<Image>(conn)
+                        .unwrap();
         
-        if nxt.is_none() {
-            result = Image::parse_xmp(path, thumb_dir);
+        if images.len() == 0 {
+            result = Image::parse_xmp(path, thumb_dir, conn);
         } else {
-            let image = nxt.unwrap().unwrap();
+            let image = &images[0];
 
-            if (image.last_modified.sec as u64) 
+            if (image.last_modified.timestamp() as u64)
                   < path.metadata().unwrap().modified().unwrap()
                         .duration_since(std::time::UNIX_EPOCH).unwrap() 
                         .as_secs() {
-                result = Image::parse_xmp(path, thumb_dir); 
+                result = Image::parse_xmp(path, thumb_dir, conn); 
             } else {
-                result = image;
+                result = image.clone();
             }
         }
 
@@ -232,29 +206,6 @@ impl Image {
 }
 
 impl Subject {
-    pub fn initialize_db(conn: &rusqlite::Connection) {
-        conn.execute("CREATE TABLE IF NOT EXISTS Subject (
-                        id          INTEGER PRIMARY KEY,
-                        family      TEXT,
-                        person      TEXT
-                    );", &[]).unwrap();
-    }
-
-    pub fn insert(&mut self, conn: &rusqlite::Connection) {
-        let id = conn.query_row("SELECT id, family, person FROM Subject
-                                WHERE family = ?1 and person = ?2", 
-                                &[&self.family, &self.person], |x| { x.get(0)});
-
-        self.id = if id.is_ok() {
-            id.unwrap()
-        } else {
-            conn.execute("INSERT INTO Subject (family, person) 
-                          VALUES (?1, ?2)", &[&self.family, &self.person]).unwrap();
-
-            conn.last_insert_rowid()
-        };
-    }
-    
     fn parse_subjects(input: &Vec<String>) -> Vec<Subject> {
         let mut result = Vec::new();
         for x in input {
@@ -267,3 +218,12 @@ impl Subject {
         result
     }
 }
+
+pub fn establish_connection() -> PgConnection {
+    dotenv().ok();
+
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    PgConnection::establish(&database_url)
+        .expect(&format!("Error connecting to {}", database_url))
+}
+

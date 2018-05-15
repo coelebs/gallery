@@ -3,3 +3,4 @@
 **/*.rs.bk
 db.sqlite
 /static/thumb
+.env

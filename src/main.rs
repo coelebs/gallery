@@ -4,34 +4,33 @@
 extern crate image;
 extern crate libraw_sys as libraw;
 extern crate quick_xml;
-extern crate rusqlite;
 extern crate rocket;
 extern crate rocket_contrib;
-extern crate time;
+extern crate chrono;
 extern crate uuid;
 extern crate env_logger;
 extern crate serde;
 extern crate clap;
+extern crate dotenv;
 
+#[macro_use] extern crate diesel;
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
-
-pub mod model;
-mod view;
-
-use rusqlite::Connection;
 
 use std::fs;
 use std::path;
 
+pub mod model;
+pub mod schema;
+pub mod view;
 
-fn read_dir(entry_point: &path::Path, thumb_dir: &path::Path, conn: &rusqlite::Connection) {
+fn read_dir(entry_point: &path::Path, thumb_dir: &path::Path, conn: &diesel::PgConnection) {
     info!("Scanning folder: {:?}", entry_point);
     for entry in fs::read_dir(entry_point).unwrap() {
         let path = entry.ok().unwrap().path();
         if path.is_file() && path.extension().unwrap()
                                  .to_str().unwrap().to_uppercase() == "CR2" {
-            model::Image::parse(&path, &thumb_dir, &conn).insert(&conn);
+            model::Image::parse(&path, &thumb_dir, &conn);
         } else if path.is_dir() {
             read_dir(&path, &thumb_dir, &conn);
         }
@@ -59,9 +58,7 @@ fn main() {
         info!("Starting scan over {:?}", entry_point);
         info!("Saving thumbnails in {:?}", thumb_dir);
 
-        let conn = Connection::open("db.sqlite").ok().unwrap();
-        model::Image::initialize_db(&conn);
-        model::Subject::initialize_db(&conn);
+        let conn = model::establish_connection();
         
         read_dir(&entry_point, &thumb_dir, &conn);
     }
