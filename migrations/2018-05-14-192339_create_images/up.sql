@@ -4,5 +4,6 @@ CREATE TABLE images (
   path            VARCHAR NOT NULL,
   rating          INTEGER NOT NULL,
   last_modified   TIMESTAMP NOT NULL,
-  thumb_path      VARCHAR NOT NULL
+  thumb_path      VARCHAR NOT NULL,
+  datetime        TIMESTAMP NOT NULL
 )

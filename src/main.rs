@@ -12,6 +12,7 @@ extern crate env_logger;
 extern crate serde;
 extern crate clap;
 extern crate dotenv;
+extern crate rexiv2;
 
 #[macro_use] extern crate diesel;
 #[macro_use] extern crate log;

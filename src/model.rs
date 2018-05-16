@@ -4,7 +4,7 @@ use std;
 use chrono;
 use schema;
 use diesel; 
-use uuid::Uuid;
+use rexiv2;
 
 use quick_xml::reader::Reader;
 use quick_xml::events::Event;
@@ -21,6 +21,8 @@ use diesel::Connection;
 
 use dotenv::dotenv;
 
+use uuid::Uuid;
+
 use super::schema::images;
 use super::schema::subjects;
 use super::schema::image_subjects;
@@ -32,6 +34,7 @@ pub struct NewImage<'a> {
     pub rating: i32,
     pub last_modified: chrono::NaiveDateTime,
     pub thumb_path: &'a str, 
+    pub datetime: chrono::NaiveDateTime,
 }
 
 #[derive(Insertable)]
@@ -56,6 +59,7 @@ pub struct Image {
     pub rating: i32,
     pub last_modified: chrono::NaiveDateTime,
     pub thumb_path: String,
+    pub datetime: chrono::NaiveDateTime,
 }
 
 #[derive(Identifiable,Debug,Serialize,Queryable,Clone,Associations)]
@@ -77,6 +81,45 @@ pub struct ImageSubject {
 }
 
 impl Image {
+    fn new(path: &path::Path, 
+           rating: i32, 
+           thumb_dir: &path::Path, 
+           mut subjects: Vec<String>,
+           conn: &PgConnection) -> Image {
+        let exiv = rexiv2::Metadata::new_from_path(&path).unwrap();
+        let image_date = chrono::NaiveDateTime::parse_from_str(
+            &exiv.get_tag_string("Exif.Image.DateTime").unwrap(),
+            "%Y:%m:%d %H:%M:%S").unwrap();
+
+        let thumb_path = Image::develop_thumb(path, thumb_dir);
+        let system_time = path.metadata().unwrap()
+                                  .modified().unwrap()
+                                  .duration_since(std::time::UNIX_EPOCH).unwrap();
+
+
+        let new_image = NewImage {
+            path: path.to_str().unwrap(),
+            rating: rating, 
+            last_modified: chrono::NaiveDateTime::from_timestamp_opt(system_time.as_secs() as i64,
+                                                                     system_time.subsec_millis()).unwrap(),
+            thumb_path: thumb_path.to_str().unwrap(),
+            datetime: image_date
+        };
+
+        let image = diesel::insert_into(schema::images::table)
+            .values(&new_image)
+            .get_result(conn)
+            .expect("Error saving new post");
+
+        subjects.retain(|x| x.trim().len() > 0);
+
+        Subject::parse_subjects(&mut subjects, conn)
+            .into_iter()
+            .for_each(|x| x.attach_to_image(&image, conn));
+
+        image
+    }
+
     fn parse_rating(input: Vec<Attribute>, reader: &Reader<BufReader<fs::File>>) -> Option<i32> {
         input.into_iter().filter(|x| x.key == b"xmp:Rating")
               .map(|x| x.unescape_and_decode_value(reader).ok().unwrap().parse().unwrap())
@@ -118,32 +161,7 @@ impl Image {
             buf.clear();
         }
 
-        raw_subjects.retain(|x| x.trim().len() > 0);
-
-
-        let thumb_path = Image::develop_thumb(img_path, thumb_dir);
-        let system_time = img_path.metadata().unwrap()
-                                  .modified().unwrap()
-                                  .duration_since(std::time::UNIX_EPOCH).unwrap();
-
-        let new_image = NewImage {
-            path: img_path.to_str().unwrap(),
-            rating: rating.unwrap(), 
-            last_modified: chrono::NaiveDateTime::from_timestamp_opt(system_time.as_secs() as i64,
-                                                                     system_time.subsec_millis()).unwrap(),
-            thumb_path: thumb_path.to_str().unwrap()
-        };
-
-        let image = diesel::insert_into(schema::images::table)
-            .values(&new_image)
-            .get_result(conn)
-            .expect("Error saving new post");
-
-        Subject::parse_subjects(&raw_subjects, conn)
-            .into_iter()
-            .for_each(|x| x.attach_to_image(&image, conn));
-
-        image
+        Image::new(img_path, rating.unwrap(), thumb_dir, raw_subjects, conn)
     }
 
     pub fn parse(path: &path::Path, thumb_dir: &path::Path, conn: &PgConnection) -> Image {
@@ -232,8 +250,9 @@ impl Image {
 }
 
 impl Subject {
-    fn parse_subjects(input: &Vec<String>, conn: &PgConnection) -> Vec<Subject> {
+    fn parse_subjects(input: &mut Vec<String>, conn: &PgConnection) -> Vec<Subject> {
         let mut result = Vec::new();
+        
         for x in input {
             let mut iter = x.rsplit("|");
             let person = iter.next().unwrap();

@@ -29,6 +29,7 @@ fn gallery(input: i32) -> Template {
     let mut context = GalleryTemplate { title: String::from("rawgallery"), images: Vec::new() };
 
     let imgs = images.filter(rating.eq(input))
+                       .order_by(datetime.asc())
                        .load::<model::Image>(&connection)
                        .expect("Error loading imaages");
 
