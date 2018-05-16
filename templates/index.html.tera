@@ -67,19 +67,17 @@
 			{% for img in images %}
             <div class="col-md-4">
               <div class="card mb-4 box-shadow">
-				  <img class="card-img-top" src="/{{img.thumb_path}}" alt="Card image cap">
+				  <img class="card-img-top" src="/{{img.0.thumb_path}}" alt="Card image cap">
                 <div class="card-body">
-					<p class="card-text">{{img.rating}}</p>
+					<p class="card-text">{{img.0.rating}}</p>
 					<p class="card-text">
-                    {#
                     <ul>
-					{% for subject in img.subjects %}
+					{% for subject in img.1 %}
 						<li>{{ subject.person | capitalize }} {{subject.family | capitalize }}</li>
 					{% endfor %}
                     </ul>
-                    #}
 					</p>
-					<p class="card-text">{{img.path}}</p>
+					<p class="card-text">{{img.0.path}}</p>
                   <div class="d-flex justify-content-between align-items-center">
                     <div class="btn-group">
                       <button type="button" class="btn btn-sm btn-outline-secondary">View</button>

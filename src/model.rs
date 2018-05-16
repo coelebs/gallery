@@ -3,8 +3,7 @@ use libraw;
 use std;
 use chrono;
 use schema;
-use diesel;
-
+use diesel; 
 use uuid::Uuid;
 
 use quick_xml::reader::Reader;
@@ -23,6 +22,8 @@ use diesel::Connection;
 use dotenv::dotenv;
 
 use super::schema::images;
+use super::schema::subjects;
+use super::schema::image_subjects;
 
 #[derive(Insertable)]
 #[table_name="images"]
@@ -33,28 +34,46 @@ pub struct NewImage<'a> {
     pub thumb_path: &'a str, 
 }
 
-#[derive(Debug,Serialize,Queryable,Clone)]
+#[derive(Insertable)]
+#[table_name="subjects"]
+pub struct NewSubject<'a> {
+    pub family: &'a str,
+    pub person: &'a str,
+}
+
+#[derive(Insertable)]
+#[table_name="image_subjects"]
+pub struct NewImageSubject {
+    pub image_id: i32,
+    pub subject_id: i32,
+}
+
+#[derive(Identifiable,Debug,Serialize,Queryable,Clone,Associations)]
+#[table_name="images"]
 pub struct Image {
     pub id: i32,
     pub path: String,
     pub rating: i32,
-    //pub subjects: Vec<Subject>,
     pub last_modified: chrono::NaiveDateTime,
     pub thumb_path: String,
 }
 
-#[derive(Debug,Serialize,Queryable)]
+#[derive(Identifiable,Debug,Serialize,Queryable,Clone,Associations)]
+#[table_name="subjects"]
 pub struct Subject {
     pub id: i32,
     pub family: String,
     pub person: String,
 }
 
-#[derive(Debug,Serialize,Queryable)]
-pub struct ImageSubjects {
-  pub id: i64,        
-  pub image_id: i64,  
-  pub subject_id: i64,
+#[derive(Identifiable,Debug,Serialize,Queryable,Associations)]
+#[belongs_to(Image)]
+#[belongs_to(Subject)]
+#[table_name="image_subjects"]
+pub struct ImageSubject {
+  pub id: i32,        
+  pub image_id: i32,  
+  pub subject_id: i32,
 }
 
 impl Image {
@@ -74,7 +93,7 @@ impl Image {
         let mut rating = None;
         let mut buf = Vec::new();
         let mut subject = false;
-        let mut subjects = Vec::new();
+        let mut raw_subjects = Vec::new();
         loop {
             match reader.read_event(&mut buf) {
                 Ok(Event::Start(ref e)) => 
@@ -92,14 +111,15 @@ impl Image {
                         _ => (),
                     },
                 Ok(Event::Eof) => break,
-                Ok(Event::Text(ref e)) => if subject {subjects.push(e.unescape_and_decode(&reader).ok().unwrap())},
+                Ok(Event::Text(ref e)) => if subject {raw_subjects.push(e.unescape_and_decode(&reader).ok().unwrap())},
                 _ => (),
             }
 
             buf.clear();
         }
 
-        subjects.retain(|x| x.trim().len() > 0);
+        raw_subjects.retain(|x| x.trim().len() > 0);
+
 
         let thumb_path = Image::develop_thumb(img_path, thumb_dir);
         let system_time = img_path.metadata().unwrap()
@@ -114,10 +134,16 @@ impl Image {
             thumb_path: thumb_path.to_str().unwrap()
         };
 
-        diesel::insert_into(schema::images::table)
+        let image = diesel::insert_into(schema::images::table)
             .values(&new_image)
             .get_result(conn)
-            .expect("Error saving new post")
+            .expect("Error saving new post");
+
+        Subject::parse_subjects(&raw_subjects, conn)
+            .into_iter()
+            .for_each(|x| x.attach_to_image(&image, conn));
+
+        image
     }
 
     pub fn parse(path: &path::Path, thumb_dir: &path::Path, conn: &PgConnection) -> Image {
@@ -206,16 +232,47 @@ impl Image {
 }
 
 impl Subject {
-    fn parse_subjects(input: &Vec<String>) -> Vec<Subject> {
+    fn parse_subjects(input: &Vec<String>, conn: &PgConnection) -> Vec<Subject> {
         let mut result = Vec::new();
         for x in input {
             let mut iter = x.rsplit("|");
             let person = iter.next().unwrap();
             let family = iter.next().unwrap();
-            result.push(Subject{id:-1, family: String::from(family), person: String::from(person)});
+
+            let subjects = subjects::table
+                .filter(subjects::person.eq(person))
+                .filter(subjects::family.eq(family))
+                .load::<Subject>(conn)
+                .expect("Error loading subject");
+
+            if subjects.len() == 0 {
+                let new_subject = NewSubject { 
+                    family,
+                    person,
+                };
+
+                result.push(diesel::insert_into(schema::subjects::table)
+                    .values(&new_subject)
+                    .get_result(conn)
+                    .expect("Error saving subject"));
+            } else {
+                result.push(subjects[0].clone());
+            }
         }
 
         result
+    }
+
+    fn attach_to_image(&self, image: &Image, conn: &PgConnection) {
+        let new_image_subject = NewImageSubject {
+            image_id: image.id,
+            subject_id: self.id,
+        };
+
+        diesel::insert_into(schema::image_subjects::table)
+            .values(&new_image_subject)
+            .execute(conn)
+            .expect("Error associating image and subject");
     }
 }
 

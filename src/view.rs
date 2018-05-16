@@ -11,7 +11,7 @@ use diesel::prelude::*;
 #[derive(Serialize)]
 struct GalleryTemplate {
     title: String,
-    images: Vec<model::Image>,
+    images: Vec<(model::Image, Vec<model::Subject>)>,
 }
 
 #[get("/")]
@@ -19,18 +19,31 @@ fn index() -> &'static str {
     "index"
 }
 
-#[get("/gallery/<rating>")]
-fn gallery(rating: i32) -> Template {
+#[get("/gallery/<input>")]
+fn gallery(input: i32) -> Template {
+    use schema::images::dsl::*;
+    use schema::subjects::dsl::*;
+    use schema::image_subjects::dsl::*;
 
     let connection = model::establish_connection();
+    let mut context = GalleryTemplate { title: String::from("rawgallery"), images: Vec::new() };
 
-    let images = schema::images::table
-                         .filter(schema::images::rating.eq(rating))
-                         .load::<model::Image>(&connection)
-                         .expect("Error loading imaages");
+    let imgs = images.filter(rating.eq(input))
+                       .load::<model::Image>(&connection)
+                       .expect("Error loading imaages");
+
+    for image in imgs.clone() {
+        let tags = image_subjects
+            .inner_join(subjects)
+            .filter(image_id.eq(image.id))
+            .select((schema::subjects::id, family, person))
+            .load::<model::Subject>(&connection)
+            .expect("Error loading subjects");
+
+        context.images.push((image, tags));
+    }
 
 
-    let context = GalleryTemplate { title: String::from("rawgallery"), images: images };
      
     Template::render("index", &context)
 }
