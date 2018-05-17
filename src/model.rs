@@ -24,8 +24,8 @@ use dotenv::dotenv;
 use uuid::Uuid;
 
 use super::schema::images;
-use super::schema::subjects;
-use super::schema::image_subjects;
+use super::schema::image_tags;
+use super::schema::tags;
 
 #[derive(Insertable)]
 #[table_name="images"]
@@ -38,17 +38,16 @@ pub struct NewImage<'a> {
 }
 
 #[derive(Insertable)]
-#[table_name="subjects"]
-pub struct NewSubject<'a> {
-    pub family: &'a str,
-    pub person: &'a str,
+#[table_name="image_tags"]
+pub struct NewImageTag {
+    pub image_id: i32,
+    pub tag_id: i32,
 }
 
 #[derive(Insertable)]
-#[table_name="image_subjects"]
-pub struct NewImageSubject {
-    pub image_id: i32,
-    pub subject_id: i32,
+#[table_name="tags"]
+pub struct NewTag<'a> {
+    pub content: Vec<&'a str>,
 }
 
 #[derive(Identifiable,Debug,Serialize,Queryable,Clone,Associations)]
@@ -63,28 +62,27 @@ pub struct Image {
 }
 
 #[derive(Identifiable,Debug,Serialize,Queryable,Clone,Associations)]
-#[table_name="subjects"]
-pub struct Subject {
-    pub id: i32,
-    pub family: String,
-    pub person: String,
+#[table_name="tags"]
+pub struct Tag {
+    pub id: i32, 
+    pub content: Vec<String>,
 }
 
 #[derive(Identifiable,Debug,Serialize,Queryable,Associations)]
 #[belongs_to(Image)]
-#[belongs_to(Subject)]
-#[table_name="image_subjects"]
-pub struct ImageSubject {
+#[belongs_to(Tag)]
+#[table_name="image_tags"]
+pub struct ImageTag {
   pub id: i32,        
   pub image_id: i32,  
-  pub subject_id: i32,
+  pub tag_id: i32,
 }
 
 impl Image {
     fn new(path: &path::Path, 
            rating: i32, 
            thumb_dir: &path::Path, 
-           mut subjects: Vec<String>,
+           mut tags: Vec<String>,
            conn: &PgConnection) -> Image {
         let exiv = rexiv2::Metadata::new_from_path(&path).unwrap();
         let image_date = chrono::NaiveDateTime::parse_from_str(
@@ -111,9 +109,9 @@ impl Image {
             .get_result(conn)
             .expect("Error saving new post");
 
-        subjects.retain(|x| x.trim().len() > 0);
+        tags.retain(|x| x.trim().len() > 0);
 
-        Subject::parse_subjects(&mut subjects, conn)
+        Tag::parse(&mut tags, conn)
             .into_iter()
             .for_each(|x| x.attach_to_image(&image, conn));
 
@@ -135,8 +133,8 @@ impl Image {
 
         let mut rating = None;
         let mut buf = Vec::new();
-        let mut subject = false;
-        let mut raw_subjects = Vec::new();
+        let mut tag = false;
+        let mut raw_tags = Vec::new();
         loop {
             match reader.read_event(&mut buf) {
                 Ok(Event::Start(ref e)) => 
@@ -145,23 +143,23 @@ impl Image {
                                                             e.attributes()
                                                             .map(|a| a.unwrap()).collect::<Vec<_>>(), &reader
                                                             ),
-                        b"lr:hierarchicalSubject" => subject = true,
+                        b"lr:hierarchicalSubject" => tag = true,
                         _ => (),
                     },
                 Ok(Event::End(ref e)) => 
                     match e.name() {
-                        b"lr:hierarchicalSubject" => subject = false,
+                        b"lr:hierarchicalSubject" => tag = false,
                         _ => (),
                     },
                 Ok(Event::Eof) => break,
-                Ok(Event::Text(ref e)) => if subject {raw_subjects.push(e.unescape_and_decode(&reader).ok().unwrap())},
+                Ok(Event::Text(ref e)) => if tag {raw_tags.push(e.unescape_and_decode(&reader).ok().unwrap())},
                 _ => (),
             }
 
             buf.clear();
         }
 
-        Image::new(img_path, rating.unwrap(), thumb_dir, raw_subjects, conn)
+        Image::new(img_path, rating.unwrap(), thumb_dir, raw_tags, conn)
     }
 
     pub fn parse(path: &path::Path, thumb_dir: &path::Path, conn: &PgConnection) -> Image {
@@ -249,33 +247,29 @@ impl Image {
     }
 }
 
-impl Subject {
-    fn parse_subjects(input: &mut Vec<String>, conn: &PgConnection) -> Vec<Subject> {
+impl Tag {
+    fn parse(input: &mut Vec<String>, conn: &PgConnection) -> Vec<Tag> {
         let mut result = Vec::new();
         
         for x in input {
-            let mut iter = x.rsplit("|");
-            let person = iter.next().unwrap();
-            let family = iter.next().unwrap();
+            let content: Vec<&str> = x.split("|").collect();
 
-            let subjects = subjects::table
-                .filter(subjects::person.eq(person))
-                .filter(subjects::family.eq(family))
-                .load::<Subject>(conn)
-                .expect("Error loading subject");
+            let tags = tags::table
+                .filter(tags::content.eq(content.clone()))
+                .load::<Tag>(conn)
+                .expect("Error loading Tag");
 
-            if subjects.len() == 0 {
-                let new_subject = NewSubject { 
-                    family,
-                    person,
+            if tags.len() == 0 {
+                let new_tag = NewTag { 
+                    content,
                 };
 
-                result.push(diesel::insert_into(schema::subjects::table)
-                    .values(&new_subject)
+                result.push(diesel::insert_into(schema::tags::table)
+                    .values(&new_tag)
                     .get_result(conn)
-                    .expect("Error saving subject"));
+                    .expect("Error saving Tag"));
             } else {
-                result.push(subjects[0].clone());
+                result.push(tags[0].clone());
             }
         }
 
@@ -283,15 +277,15 @@ impl Subject {
     }
 
     fn attach_to_image(&self, image: &Image, conn: &PgConnection) {
-        let new_image_subject = NewImageSubject {
+        let new_image_tag = NewImageTag {
             image_id: image.id,
-            subject_id: self.id,
+            tag_id: self.id,
         };
 
-        diesel::insert_into(schema::image_subjects::table)
-            .values(&new_image_subject)
+        diesel::insert_into(schema::image_tags::table)
+            .values(&new_image_tag)
             .execute(conn)
-            .expect("Error associating image and subject");
+            .expect("Error associating image and tag");
     }
 }
 

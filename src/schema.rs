@@ -1,8 +1,8 @@
 table! {
-    image_subjects (id) {
+    image_tags (id) {
         id -> Int4,
         image_id -> Int4,
-        subject_id -> Int4,
+        tag_id -> Int4,
     }
 }
 
@@ -25,11 +25,19 @@ table! {
     }
 }
 
-joinable!(image_subjects -> images (image_id));
-joinable!(image_subjects -> subjects (subject_id));
+table! {
+    tags (id) {
+        id -> Int4,
+        content -> Array<Text>,
+    }
+}
+
+joinable!(image_tags -> images (image_id));
+joinable!(image_tags -> tags (tag_id));
 
 allow_tables_to_appear_in_same_query!(
-    image_subjects,
+    image_tags,
     images,
     subjects,
+    tags,
 );

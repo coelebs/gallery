@@ -68,12 +68,12 @@
             <div class="col-md-4">
               <div class="card mb-4 box-shadow">
 				  <img class="card-img-top" src="/{{img.0.thumb_path}}" alt="Card image cap">
-                <div class="card-body">
+                    <div class="card-body">
 					<p class="card-text">{{img.0.rating}}</p>
 					<p class="card-text">
                     <ul>
-					{% for subject in img.1 %}
-						<li>{{ subject.person | capitalize }} {{subject.family | capitalize }}</li>
+					{% for tags in img.1 %}
+                    <li>{% for tag in tags.content %}{{ tag }} {% endfor %}</li>
 					{% endfor %}
                     </ul>
 					</p>

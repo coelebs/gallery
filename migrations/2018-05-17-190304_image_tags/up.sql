@@ -1,6 +1,6 @@
 -- Your SQL goes here
-CREATE TABLE image_subjects (
+CREATE TABLE image_tags (
   id          SERIAL PRIMARY KEY, 
   image_id    SERIAL references images(id),
-  subject_id  SERIAL references subjects(id)
+  tag_id      SERIAL references tags(id)
 )
