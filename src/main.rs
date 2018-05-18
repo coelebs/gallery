@@ -1,4 +1,4 @@
-#![feature(plugin)]
+#![feature(plugin, custom_derive)]
 #![plugin(rocket_codegen)]
 
 extern crate image;
@@ -65,7 +65,7 @@ fn main() {
     }
 
     rocket::ignite()
-        .mount("/", routes![view::index, view::gallery, view::files])
+        .mount("/", routes![view::index, view::gallery, view::filter_gallery, view::files])
         .attach(rocket_contrib::Template::fairing())
         .launch();
 }

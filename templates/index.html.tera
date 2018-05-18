@@ -11,6 +11,16 @@
 
     <!-- Bootstrap core CSS -->
     <link href="/static/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/jquery-ui.min.css" rel="stylesheet">
+
+    <script src="/static/jquery-3.3.1.min.js"></script>
+    <script src="/static/jquery-ui.min.js"></script>
+    <script>
+        $( function() {
+            $( ".datepicker" ).datepicker();
+            $( ".datepicker" ).datepicker( "option", "dateFormat", "yy-mm-dd" );
+        } );
+    </script>
   </head>
 
   <body>
@@ -51,12 +61,27 @@
 
       <section class="jumbotron text-center">
         <div class="container">
-          <h1 class="jumbotron-heading">Album example</h1>
-          <p class="lead text-muted">Something short and leading about the collection below—its contents, the creator, etc. Make it short and sweet, but not too short so folks don't simply skip over it entirely.</p>
-          <p>
-            <a href="#" class="btn btn-primary my-2">Main call to action</a>
-            <a href="#" class="btn btn-secondary my-2">Secondary action</a>
-          </p>
+            <form action="/gallery" method="get">
+                <label for="rating">Rating:</label>
+                <select name="rating">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                </select>
+                
+                <label for="from">From:</label>
+                <input type="text" class="datepicker" id="from" name="from" />
+
+                <label for="to">To:</label>
+                <input type="text" class="datepicker" id="to" name="to" />
+
+                <label for="tags">Tags:</label>
+                <input type="text" name="tags" />
+
+                <button type="submit">filter</button>
+            </form>
         </div>
       </section>
 
@@ -109,10 +134,9 @@
     <!-- Bootstrap core JavaScript
     ================================================== -->
     <!-- Placed at the end of the document so the pages load faster -->
-    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
-    <script>window.jQuery || document.write('<script src="../../assets/js/vendor/jquery-slim.min.js"><\/script>')</script>
     <script src="/static/popper.min.js"></script>
     <script src="/static/bootstrap.min.js"></script>
+    <script src="/static/holder.min.js"></script>
     <script src="/static/holder.min.js"></script>
   </body>
 </html>
