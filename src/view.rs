@@ -13,16 +13,66 @@ use diesel::prelude::*;
 struct GalleryTemplate {
     title: String,
     images: Vec<(model::Image, Vec<model::Tag>)>,
+    rating: i32,
+    from: String,
+    to: String,
+    tags: String,
 }
 
-#[derive(Debug, FromForm)]
-struct Filter {
+#[derive(Debug, FromForm, Clone, Serialize)]
+struct Input {
     rating: Option<i32>,
     from: Option<String>,
     to: Option<String>,
     tags: Option<String>,
 }
 
+impl GalleryTemplate {
+    fn new(input: Option<Input>) -> GalleryTemplate {
+        if input.is_none() {
+            GalleryTemplate {
+                title: String::from("rawgallery"), 
+                rating: 1,
+                to: String::new(),
+                from: String::new(),
+                tags: String::new(),
+                images: Vec::new() 
+            }
+        } else {
+            let unwrapped = input.unwrap();
+            GalleryTemplate {
+                title: String::from("rawgallery"), 
+                rating: unwrapped.rating.unwrap_or(1),
+                to: unwrapped.to.unwrap_or(String::new()),
+                from: unwrapped.from.unwrap_or(String::new()),
+                tags: unwrapped.tags.unwrap_or(String::new()),
+                images: Vec::new() 
+            }
+        }
+    }
+}
+
+impl Input {
+    fn parsed_from(&self) -> chrono::NaiveDateTime {
+        if self.from.is_some() && self.from.clone().unwrap().len() > 0 {
+            chrono::NaiveDate::parse_from_str(&self.from.clone().unwrap(), "%Y-%m-%d")
+                .unwrap_or(chrono::NaiveDate::from_yo(1970, 1))
+                .and_hms(0,0,0)
+        }  else {
+            chrono::NaiveDateTime::from_timestamp(0, 0)
+        }
+    }
+
+    fn parsed_to(&self) -> chrono::NaiveDateTime {
+        if self.to.is_some() && self.to.clone().unwrap().len() > 0 {
+            chrono::NaiveDate::parse_from_str(&self.to.clone().unwrap(), "%Y-%m-%d")
+                .unwrap_or(chrono::NaiveDate::from_yo(2170, 1))
+                .and_hms(23, 59, 59)
+        }  else {
+            chrono::Utc::now().naive_local()
+        }
+    }
+}
 
 #[get("/")]
 fn index() -> &'static str {
@@ -35,51 +85,33 @@ fn gallery() -> Template {
 }
 
 #[get("/gallery?<filter>")]
-fn filter_gallery(filter: Option<Filter>) -> Template {
+fn filter_gallery(filter: Option<Input>) -> Template {
     use schema::images::dsl::*;
     use schema::image_tags::dsl::*;
     use schema::tags::dsl::*;
 
     let connection = model::establish_connection();
-    let mut context = GalleryTemplate { title: String::from("rawgallery"), images: Vec::new() };
+
+    let mut context = GalleryTemplate::new(filter.clone());
 
     let imgs;
     let mut tags_input = None;
     if let Some(raw_filter) = filter {
-        tags_input = raw_filter.tags; 
-
-
-        let from_filter;
-        if raw_filter.from.is_some() && raw_filter.from.clone().unwrap().len() > 0 {
-            from_filter = datetime.gt(
-                chrono::NaiveDate::parse_from_str(&raw_filter.from.unwrap(), "%Y-%m-%d").unwrap().and_hms(0,0,0));
-        }  else {
-            from_filter = datetime.gt(
-                chrono::NaiveDateTime::from_timestamp(0, 0));
-        }
-
-        let to_filter;
-        if raw_filter.to.is_some() && raw_filter.to.clone().unwrap().len() > 0 {
-            to_filter = datetime.lt(
-                chrono::NaiveDate::parse_from_str(&raw_filter.to.unwrap(), "%Y-%m-%d").unwrap().and_hms(23, 59, 59));
-        }  else {
-            to_filter = datetime.lt(
-                chrono::NaiveDateTime::from_timestamp(chrono::Utc::now().timestamp(), 0));
-        }
+        tags_input = raw_filter.clone().tags;
 
         imgs = images
+            .order(datetime.asc())
             .filter(rating.ge(raw_filter.rating.unwrap_or(0)))
-            .filter(to_filter)
-            .filter(from_filter)
+            .filter(datetime.gt(raw_filter.clone().parsed_from()))
+            .filter(datetime.lt(raw_filter.clone().parsed_to()))
             .load::<model::Image>(&connection)
             .expect("Error filtering and loading images");
     }  else {
         imgs = images
+            .order(datetime.asc())
             .load::<model::Image>(&connection)
             .expect("Error loading imaages");
     }
-
-
 
     for image in imgs.clone() {
         let tag_query = image_tags

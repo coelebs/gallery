@@ -18,14 +18,6 @@ table! {
 }
 
 table! {
-    subjects (id) {
-        id -> Int4,
-        family -> Varchar,
-        person -> Varchar,
-    }
-}
-
-table! {
     tags (id) {
         id -> Int4,
         content -> Array<Text>,
@@ -38,6 +30,5 @@ joinable!(image_tags -> tags (tag_id));
 allow_tables_to_appear_in_same_query!(
     image_tags,
     images,
-    subjects,
     tags,
 );
