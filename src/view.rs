@@ -17,6 +17,7 @@ struct GalleryTemplate {
     from: String,
     to: String,
     tags: String,
+    page: i64,
 }
 
 #[derive(Debug, FromForm, Clone, Serialize)]
@@ -28,7 +29,7 @@ struct Input {
 }
 
 impl GalleryTemplate {
-    fn new(input: Option<Input>) -> GalleryTemplate {
+    fn new(input: Option<Input>, page: i64) -> GalleryTemplate {
         if input.is_none() {
             GalleryTemplate {
                 title: String::from("rawgallery"), 
@@ -36,7 +37,8 @@ impl GalleryTemplate {
                 to: String::new(),
                 from: String::new(),
                 tags: String::new(),
-                images: Vec::new() 
+                images: Vec::new(),
+                page: page
             }
         } else {
             let unwrapped = input.unwrap();
@@ -46,7 +48,8 @@ impl GalleryTemplate {
                 to: unwrapped.to.unwrap_or(String::new()),
                 from: unwrapped.from.unwrap_or(String::new()),
                 tags: unwrapped.tags.unwrap_or(String::new()),
-                images: Vec::new() 
+                images: Vec::new(),
+                page: page
             }
         }
     }
@@ -79,20 +82,20 @@ fn index() -> &'static str {
     "index"
 }
 
-#[get("/gallery")]
-fn gallery() -> Template {
-    filter_gallery(None)
+#[get("/gallery?<filter>")]
+fn gallery(filter: Option<Input>) -> Template {
+    filter_gallery(0, filter)
 }
 
-#[get("/gallery?<filter>")]
-fn filter_gallery(filter: Option<Input>) -> Template {
+#[get("/gallery/<page>?<filter>")]
+fn filter_gallery(page: i64, filter: Option<Input>) -> Template {
     use schema::images::dsl::*;
     use schema::image_tags::dsl::*;
     use schema::tags::dsl::*;
 
     let connection = model::establish_connection();
 
-    let mut context = GalleryTemplate::new(filter.clone());
+    let mut context = GalleryTemplate::new(filter.clone(), page);
 
     let imgs;
     let mut tags_input = None;
@@ -104,11 +107,15 @@ fn filter_gallery(filter: Option<Input>) -> Template {
             .filter(rating.ge(raw_filter.rating.unwrap_or(0)))
             .filter(datetime.gt(raw_filter.clone().parsed_from()))
             .filter(datetime.lt(raw_filter.clone().parsed_to()))
+            .offset(50 * page)
+            .limit(50)
             .load::<model::Image>(&connection)
             .expect("Error filtering and loading images");
     }  else {
         imgs = images
             .order(datetime.asc())
+            .offset(50 * page)
+            .limit(50)
             .load::<model::Image>(&connection)
             .expect("Error loading imaages");
     }
@@ -139,6 +146,8 @@ fn filter_gallery(filter: Option<Input>) -> Template {
             context.images.push((image, tag_list));
         }
     }
+
+    println!("Len: {:?}", context.images.len());
      
     Template::render("index", &context)
 }

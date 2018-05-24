@@ -140,6 +140,8 @@
         </div>
       </div>
 
+      <a href="/gallery/{{ page + 1 }}?rating={{rating}}&to={{to}}&from={{from}}&tags={{tags}}">Next Page</a>
+
     </main>
 
     <footer class="text-muted">
